@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ToolKit Pro</title>
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9683643895235168"
-     crossorigin="anonymous"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet">
 <!-- Firebase Compat SDK — for Google Sign-In on HTTPS -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -954,20 +952,14 @@ async function lpSubmit(){
   }
 }
 
-// ── Login ──
+// ── Login — Firebase Auth ──
 async function doLogin(email, pass){
-  const db = getDB();
-  const h  = await hash(email + pass);
-
-  // Admin first login — creates account on first valid attempt
+  // Admin — local system (no Firebase needed)
   if(email === AE){
+    const db = getDB();
+    const h  = await hash(email + pass);
     if(!db[email]){
-      // First time admin login — store hash
-      const u = {
-        uid:'admin_001', name:'Siddhartha', email,
-        hash:h, status:'active', provider:'email',
-        createdAt:Date.now(), lastLogin:Date.now(), isAdmin:true
-      };
+      const u = { uid:'admin_001', name:'Siddhartha', email, hash:h, status:'active', provider:'email', createdAt:Date.now(), lastLogin:Date.now(), isAdmin:true };
       db[email] = u; setDB(db);
       const s = { uid:'admin_001', name:'Siddhartha', email, isAdmin:true };
       setSes(s); return s;
@@ -978,27 +970,44 @@ async function doLogin(email, pass){
     setSes(s); return s;
   }
 
-  // Normal user
-  if(!db[email])              throw { code:'auth/user-not-found' };
-  if(db[email].status === 'blocked') throw { code:'auth/user-blocked' };
-  if(db[email].hash !== h)    throw { code:'auth/wrong-password' };
-  db[email].lastLogin = Date.now(); setDB(db);
-  const s = { uid:db[email].uid, name:db[email].name, email, photo:db[email].photo||'' };
+  // Normal user — Firebase
+  if(!window._fbAuth) throw { code:'auth/network-request-failed' };
+  const cred = await window._fbAuth.signInWithEmailAndPassword(email, pass);
+  const user = cred.user;
+  // Check if blocked in local DB
+  const db = getDB();
+  if(db[email]?.status === 'blocked') {
+    await window._fbAuth.signOut();
+    throw { code:'auth/user-blocked' };
+  }
+  // Sync to local DB for admin panel
+  if(!db[email]){
+    db[email] = { uid:user.uid, name:user.displayName||email.split('@')[0], email, hash:'', status:'active', provider:'email', createdAt:Date.now(), lastLogin:Date.now(), photo:'' };
+  } else {
+    db[email].lastLogin = Date.now();
+  }
+  setDB(db);
+  const s = { uid:user.uid, name:user.displayName||db[email].name||email.split('@')[0], email, photo:user.photoURL||'' };
   setSes(s); return s;
 }
 
-// ── Signup ──
+// ── Signup — Firebase Auth ──
 async function doSignup(name, email, pass){
+  if(!window._fbAuth) throw { code:'auth/network-request-failed' };
+  // Check blocked
   const db = getDB();
-  if(db[email]) throw { code:'auth/email-already-in-use' };
-  const h  = await hash(email + pass);
-  const u  = {
-    uid:mkid(), name, email, hash:h,
-    status:'active', provider:'email',
-    createdAt:Date.now(), lastLogin:Date.now(), photo:''
-  };
-  db[email] = u; setDB(db);
-  const s = { uid:u.uid, name, email, photo:'' };
+  if(db[email]?.status === 'blocked') throw { code:'auth/user-blocked' };
+
+  const cred = await window._fbAuth.createUserWithEmailAndPassword(email, pass);
+  const user = cred.user;
+  // Set display name
+  await user.updateProfile({ displayName: name });
+  // Send verification email
+  await user.sendEmailVerification().catch(()=>{});
+  // Sync to local DB
+  db[email] = { uid:user.uid, name, email, hash:'', status:'active', provider:'email', createdAt:Date.now(), lastLogin:Date.now(), photo:'' };
+  setDB(db);
+  const s = { uid:user.uid, name, email, photo:'' };
   setSes(s); return s;
 }
 
@@ -1133,21 +1142,40 @@ async function doForgot(){
     errEl.classList.add('show'); return;
   }
 
-  btn.disabled = true; btn.textContent = 'Checking…';
+  btn.disabled = true; btn.textContent = 'Sending…';
 
-  const db = getDB();
-  if(!db[email]){
-    errEl.textContent = 'No account found with this email.';
-    errEl.classList.add('show');
-    btn.disabled = false; btn.textContent = 'Send Link';
+  // Admin — local only
+  if(email === AE){
+    sucEl.innerHTML = '✅ Admin account — contact developer to reset password.';
+    sucEl.classList.add('show');
+    btn.textContent = 'Done ✓';
+    setTimeout(()=>{ hideForgot(); btn.disabled=false; btn.textContent='Send Link'; }, 3000);
     return;
   }
 
-  // Local mode — can't send email, show instructions
-  sucEl.innerHTML = '✅ Account found!<br><strong>Local Mode:</strong> To reset your password, contact admin at <strong>Siddharthakaithwar@gmail.com</strong> with your email.';
-  sucEl.classList.add('show');
-  btn.textContent = 'Done ✓';
-  setTimeout(()=>{ hideForgot(); btn.disabled=false; btn.textContent='Send Link'; }, 3500);
+  if(!window._fbAuth){
+    errEl.textContent = 'Service unavailable. Please try again later.';
+    errEl.classList.add('show');
+    btn.disabled=false; btn.textContent='Send Link';
+    return;
+  }
+
+  try {
+    await window._fbAuth.sendPasswordResetEmail(email);
+    sucEl.innerHTML = '✅ Password reset link sent!<br>Check your email inbox (and spam folder).';
+    sucEl.classList.add('show');
+    btn.textContent = 'Sent ✓';
+    setTimeout(()=>{ hideForgot(); btn.disabled=false; btn.textContent='Send Link'; }, 3500);
+  } catch(err) {
+    const msgs = {
+      'auth/user-not-found': 'No account found with this email.',
+      'auth/invalid-email':  'Please enter a valid email address.',
+      'auth/too-many-requests': 'Too many requests. Try again later.',
+    };
+    errEl.textContent = msgs[err.code] || 'Failed to send reset email. Try again.';
+    errEl.classList.add('show');
+    btn.disabled=false; btn.textContent='Send Link';
+  }
 }
 
 // Close forgot modal on backdrop click
@@ -2581,3 +2609,4 @@ function adminDel(uid,email){
 </div><!-- end app-page -->
 </body>
 </html>
+
