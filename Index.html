@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9683643895235168" crossorigin="anonymous"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ToolKit Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet">
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9683643895235168"
-     crossorigin="anonymous"></script>
 <!-- Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -714,7 +713,8 @@ nav::-webkit-scrollbar{height:0;}
 
 
 .nav-user-area{display:flex;align-items:center;gap:8px;margin-left:auto;padding:4px 10px;flex-shrink:0;}
-.nav-avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent3));display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:700;color:#000;font-family:"Rajdhani",sans-serif;flex-shrink:0;border:2px solid rgba(0,245,255,.3);}
+.nav-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent3));display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:700;color:#000;font-family:"Rajdhani",sans-serif;flex-shrink:0;border:2px solid rgba(0,245,255,.4);overflow:hidden;cursor:pointer;transition:box-shadow .2s;}
+.nav-avatar:hover{box-shadow:0 0 12px rgba(0,245,255,.4);}
 .nav-uname{font-size:.75rem;font-weight:700;color:var(--text);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .nav-logout{padding:5px 11px;border:1px solid var(--border);border-radius:7px;background:none;color:var(--accent2);cursor:pointer;font-family:"Exo 2",sans-serif;font-size:.72rem;font-weight:600;white-space:nowrap;flex-shrink:0;}
 .admin-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
@@ -1023,59 +1023,6 @@ function errMsg(code){
   return m[code] || 'Something went wrong. Please try again. (' + code + ')';
 }
 
-// ── Google button ──
-// ── Google Sign-In (Firebase — works on HTTPS/Netlify) ──
-function lpGoogle(){
-  if(location.protocol !== 'https:'){
-    lpErr('Google Sign-In requires HTTPS hosting.\nPlease use Email + Password on local files.');
-    return;
-  }
-  if(!window._fbReady || !window._fbAuth){
-    lpErr('Google Sign-In not available. Please use Email + Password.');
-    return;
-  }
-  lpErrClear();
-  lpLoad(true);
-  const provider = new firebase.auth.GoogleAuthProvider();
-  window._fbAuth.signInWithPopup(provider)
-    .then(result => {
-      lpLoad(false);
-      const user = result.user;
-      const name = user.displayName || user.email.split('@')[0];
-      // Save to local DB so admin can see them
-      const db = getDB();
-      if(!db[user.email.toLowerCase()]){
-        db[user.email.toLowerCase()] = {
-          uid: user.uid, name: name,
-          email: user.email.toLowerCase(),
-          hash: '', status: 'active',
-          provider: 'google', photo: user.photoURL||'',
-          createdAt: Date.now(), lastLogin: Date.now()
-        };
-      } else {
-        db[user.email.toLowerCase()].lastLogin = Date.now();
-      }
-      setDB(db);
-      const session = {
-        uid: user.uid, name: name,
-        email: user.email.toLowerCase(),
-        photo: user.photoURL || ''
-      };
-      setSes(session);
-      gotoApp(session);
-    })
-    .catch(err => {
-      lpLoad(false);
-      const msgs = {
-        'auth/popup-closed-by-user':  'Sign-in cancelled.',
-        'auth/popup-blocked':         'Popup blocked. Allow popups and try again.',
-        'auth/cancelled-popup-request':'Sign-in cancelled.',
-        'auth/network-request-failed':'Network error. Check your connection.',
-        'auth/unauthorized-domain':   'This domain is not authorized.\nAdd it in Firebase Console → Authentication → Authorized domains.',
-      };
-      lpErr(msgs[err.code] || 'Google Sign-In failed: ' + err.message);
-    });
-}
 
 // ── Go to app ──
 function gotoApp(session){
@@ -1088,8 +1035,34 @@ function gotoApp(session){
   // Update nav
   const name = session.name || session.email.split('@')[0];
   const el = id => document.getElementById(id);
-  if(el('nav-uname'))   el('nav-uname').textContent = name;
-  if(el('nav-avatar'))  el('nav-avatar').textContent = name.charAt(0).toUpperCase();
+  if(el('nav-uname')) el('nav-uname').textContent = name;
+
+  // Avatar — Gravatar + colored initial fallback
+  const avatarEl = el('nav-avatar');
+  if(avatarEl){
+    const initial = name.charAt(0).toUpperCase();
+    let hash = 0;
+    for(let i=0;i<session.email.length;i++) hash = session.email.charCodeAt(i) + ((hash<<5)-hash);
+    const colors = ['#00f5ff','#ff2060','#7c3aed','#00c896','#ff6b00','#0099ff'];
+    const bgColor = colors[Math.abs(hash) % colors.length];
+    // Show initial with color immediately
+    avatarEl.textContent = initial;
+    avatarEl.style.background = 'linear-gradient(135deg, '+bgColor+', '+bgColor+'88)';
+    // Try Gravatar async
+    digestHex(session.email.trim().toLowerCase()).then(hexHash => {
+      const gravatarUrl = 'https://www.gravatar.com/avatar/'+hexHash+'?s=60&d=404';
+      const img = new Image();
+      img.onload = () => {
+        avatarEl.innerHTML = '';
+        avatarEl.style.background = 'none';
+        const imgEl = document.createElement('img');
+        imgEl.src = gravatarUrl;
+        imgEl.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover;';
+        avatarEl.appendChild(imgEl);
+      };
+      img.src = gravatarUrl;
+    });
+  }
 
   const isAdmin = session.isAdmin || session.email.toLowerCase() === AE.toLowerCase();
   const adminBtn = el('nav-admin-btn');
@@ -1097,6 +1070,14 @@ function gotoApp(session){
 
   window._isAdmin     = isAdmin;
   window._currentUser = session;
+}
+
+// MD5-like hex digest for Gravatar (using SHA-256 as fallback — Gravatar accepts both)
+async function digestHex(str){
+  try{
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){ return str.split('').map(c=>c.charCodeAt(0).toString(16)).join(''); }
 }
 
 // ── Logout ──
@@ -1160,7 +1141,7 @@ async function doForgot(){
 
   try {
     const { error } = await window._supa.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin
+      redirectTo: 'https://rainbow-bombolone-7f6289.netlify.app'
     });
     if(error) throw error;
     sucEl.innerHTML = '✅ Password reset link sent!<br>Check your email inbox (and spam folder).';
